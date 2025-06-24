@@ -1,0 +1,4 @@
+round,train_loss,val_loss,val_accuracy
+1,1.5,0.2,0.75
+2,1.1,0.4,0.80
+3,0.9,0.6,0.85

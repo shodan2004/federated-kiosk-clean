@@ -1,72 +1,79 @@
 import streamlit as st
 import pandas as pd
-import os
+import psycopg2
+from datetime import datetime
 
-LOG_FILE = "training_logs.csv"
-
+# Streamlit page config
 st.set_page_config(page_title="Federated Learning Dashboard", layout="wide")
 st.title("📡 Federated Learning Dashboard")
 
-# Load CSV logs
-def load_logs():
-    if not os.path.exists(LOG_FILE):
-        return pd.DataFrame(columns=["round", "train_loss", "val_loss", "val_accuracy"])
+# Supabase connection URI (Session Pooler - IPv4 compatible)
+SUPABASE_DB_URL = "postgresql://postgres.xjvteeaqbttimgcyjzyu:shodhanAdmin123@aws-0-ap-south-1.pooler.supabase.com:6543/postgres"
+
+# Load data function
+def load_data():
     try:
-        return pd.read_csv(LOG_FILE)
-    except Exception:
-        return pd.DataFrame(columns=["round", "train_loss", "val_loss", "val_accuracy"])
+        conn = psycopg2.connect(SUPABASE_DB_URL)
+        df = pd.read_sql("SELECT * FROM training_logs ORDER BY timestamp ASC", conn)
+        conn.close()
+        return df
+    except Exception as e:
+        st.error(f"Error fetching data: {e}")
+        return pd.DataFrame()
 
-# Initialize session state
-if "training" not in st.session_state:
-    st.session_state.training = False
+# Sidebar: manual refresh and timestamp
+st.sidebar.markdown("### 🔁 Refresh Options")
+if st.sidebar.button("🔄 Refresh Now"):
+    st.experimental_rerun()
 
-col1, col2, col3 = st.columns(3)
+last_updated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+st.sidebar.markdown(f"🕒 Last updated at: `{last_updated}`")
 
-with col1:
-    if st.button("▶️ Start Training"):
-        st.session_state.training = True
-        st.success("Training started!")
+# Load training logs from Supabase
+df_all = load_data()
 
-with col2:
-    if st.button("⏹ Stop Training"):
-        st.session_state.training = False
-        st.warning("Training stopped.")
+# Sidebar: select client
+client_ids = ["All Clients"]
+if not df_all.empty and "client_id" in df_all.columns:
+    client_ids += sorted(df_all["client_id"].dropna().unique())
+selected_client = st.sidebar.selectbox("🔍 Select Kiosk (Client ID):", client_ids)
 
-with col3:
-    if st.button("🔄 Refresh Logs"):
-        st.rerun()
-
-df = load_logs()
-
-if df.empty or "round" not in df.columns:
-    st.info("No valid training logs available yet.")
+# Filter by selected client
+if selected_client != "All Clients":
+    df = df_all[df_all["client_id"] == selected_client]
 else:
-    # Clean up invalid rows
-    df.dropna(subset=["round"], inplace=True)
+    df = df_all
 
-    st.subheader("📈 Training Progress")
-    try:
-        st.line_chart(df.set_index("round")[["val_loss", "val_accuracy"]])
-    except KeyError:
-        st.warning("Missing columns for chart: 'val_loss' or 'val_accuracy'")
+if df.empty:
+    st.warning("No training data available.")
+    st.stop()
 
-    latest = df.tail(1)
-    if not latest.empty:
-        val_loss = latest["val_loss"].values[0] if "val_loss" in df.columns else None
-        val_acc = latest["val_accuracy"].values[0] if "val_accuracy" in df.columns else None
+# Kiosk health indicator
+def get_status_color(loss):
+    if loss < 0.3:
+        return "🟢 Healthy"
+    elif loss < 0.6:
+        return "🟡 Degrading"
+    else:
+        return "🔴 Alert"
 
-        if val_loss is not None:
-            st.metric("📉 Latest Validation Loss", f"{val_loss:.4f}")
-        if val_acc is not None:
-            st.metric("🎯 Latest Validation Accuracy", f"{val_acc * 100:.2f}%")
+latest = df.iloc[-1]
+status = get_status_color(latest["val_loss"])
+st.metric(label="📟 Kiosk Status", value=status)
+st.markdown("---")
 
-    st.subheader("📋 Log Table")
-    st.dataframe(df)
+# Training Progress
+st.subheader("📈 Training Progress")
+st.line_chart(df[["train_loss", "val_loss"]])
 
-if st.session_state.training and not df.empty:
-    round_num = int(df["round"].max())
-    st.info(f"🔁 Training in progress... Round {round_num}")
-elif not st.session_state.training:
-    st.info("⏸ Training is paused. You can start it above.")
+# Accuracy Monitoring
+st.subheader("🎯 Validation Accuracy")
+st.line_chart(df["val_accuracy"])
 
-st.caption("🔁 Refresh the page or use 'Refresh Logs' to update charts.")
+# Data Table & Export
+# Data Table & Export
+st.subheader("📄 Training Log")
+st.dataframe(df, use_container_width=True)
+
+csv = df.to_csv(index=False).encode("utf-8")
+st.download_button("⬇️ Export CSV", data=csv, file_name="training_logs.csv", mime="text/csv")

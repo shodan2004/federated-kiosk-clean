@@ -8,8 +8,7 @@ st.set_page_config(page_title="Federated Learning Dashboard", layout="wide")
 st.title("📡 Federated Learning Dashboard")
 
 # Supabase connection URI (Session Pooler - IPv4 compatible)
-SUPABASE_DB_URL = "postgresql://postgres.xjvteeaqbttimgcyjzyu:shodhanAdmin123@aws-0-ap-south-1.pooler.supabase.com:6543/postgres"
-
+SUPABASE_DB_URL = st.secrets["SUPABASE_DB_URL"]
 # Load data function
 def load_data():
     try:
